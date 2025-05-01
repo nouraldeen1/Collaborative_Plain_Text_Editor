@@ -129,7 +129,7 @@ public class CollaborativeClient {
         this.operationCallback = callback;
     }
 
-    public void setDocumentCallback(.ConcurrentHashMap<Key, Value> callback) {
+    public void setDocumentCallback(ConcurrentHashMap<Key, Value> callback) {
         this.documentCallback = callback;
     }
 

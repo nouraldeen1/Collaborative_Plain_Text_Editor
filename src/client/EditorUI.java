@@ -204,7 +204,7 @@ public class EditorUI extends Application {
 
     private void handleTextChange(String oldValue, String newValue) {
         try {
-            int position = textArea.getCaret Detached();
+            int position = textArea.getCaretPosition();
             if (newValue.length() > oldValue.length()) {
                 // Insertion
                 char inserted = newValue.charAt(position - 1);
