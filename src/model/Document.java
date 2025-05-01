@@ -7,7 +7,7 @@ import java.util.TreeMap;
 public class Document {
     private String editorCode;   // Unique code for editors
     private String viewerCode;  // Unique code for read-only viewers
-    private TreeMap<String, CRDTNode> content; // CRDT structure (identifier -> node)
+    private TreeMap<String, CRDVNode> content; // CRDT structure (identifier -> node)
     private Set<User> activeUsers; // Users currently in the session
 
     public Document(String editorCode, String viewerCode) {
@@ -18,13 +18,13 @@ public class Document {
     }
 
     // Add a character to the document
-    public void addNode(CRDTNode node) {
+    public void addNode(CRDVNode node) {
         content.put(node.getIdentifier(), node);
     }
 
     // Mark a character as deleted
     public void deleteNode(String identifier) {
-        CRDTNode node = content.get(identifier);
+        CRDVNode node = content.get(identifier);
         if (node != null) {
             node.setDeleted(true);
         }
@@ -49,7 +49,7 @@ public class Document {
         return viewerCode;
     }
 
-    public TreeMap<String, CRDTNode> getContent() {
+    public TreeMap<String, CRDVNode> getContent() {
         return content;
     }
 
@@ -60,7 +60,7 @@ public class Document {
     // Get document text (visible characters only)
     public String getText() {
         StringBuilder text = new StringBuilder();
-        for (CRDTNode node : content.values()) {
+        for (CRDVNode node : content.values()) {
             if (!node.isDeleted()) {
                 text.append(node.getValue());
             }
