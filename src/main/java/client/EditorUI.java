@@ -13,6 +13,9 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.geometry.Insets;
 import model.Document;
 import model.Operation;
 import model.User;
@@ -74,6 +77,9 @@ public class EditorUI extends Application {
         root.setTop(topBox);
         root.setCenter(textArea);
         root.setRight(userList);
+
+        // Add copy buttons
+        addCopyButtons(topBox);
 
         // Event handlers
         joinButton.setOnAction(e -> joinSession(codeField.getText()));
@@ -159,11 +165,24 @@ public class EditorUI extends Application {
             
             // Set up callbacks to receive document information from server
             client.setDocumentCallback(documentText -> {
-                Platform.runLater(() -> {
-                    textArea.setText(documentText);
-                    // Update UI elements after joining
-                    codeLabel.setText("Connected with code: " + code);
-                });
+                try {
+                    document = JsonUtil.fromJson(documentText, Document.class);
+                    Platform.runLater(() -> {
+                        textArea.setText(document.getText());
+                        
+                        // Print session codes to console for easy copying
+                        System.out.println("\n========== SESSION CODES ==========");
+                        System.out.println("Editor Code: " + document.getEditorCode());
+                        System.out.println("Viewer Code: " + document.getViewerCode());
+                        System.out.println("==================================\n");
+                        
+                        // Update UI with codes
+                        codeLabel.setText("Editor: " + document.getEditorCode() + 
+                                         " | Viewer: " + document.getViewerCode());
+                    });
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             });
             
             // Setup other callbacks if needed
@@ -283,6 +302,35 @@ public class EditorUI extends Application {
         alert.setTitle("Error");
         alert.setContentText(message);
         alert.showAndWait();
+    }
+
+    private void addCopyButtons(VBox topBox) {
+        Button copyEditorCodeBtn = new Button("Copy Editor Code");
+        Button copyViewerCodeBtn = new Button("Copy Viewer Code");
+        HBox buttonBox = new HBox(10, copyEditorCodeBtn, copyViewerCodeBtn);
+        buttonBox.setPadding(new Insets(5));
+        
+        copyEditorCodeBtn.setOnAction(e -> {
+            if (document != null) {
+                final Clipboard clipboard = Clipboard.getSystemClipboard();
+                final ClipboardContent content = new ClipboardContent();
+                content.putString(document.getEditorCode());
+                clipboard.setContent(content);
+                System.out.println("Editor code copied: " + document.getEditorCode());
+            }
+        });
+        
+        copyViewerCodeBtn.setOnAction(e -> {
+            if (document != null) {
+                final Clipboard clipboard = Clipboard.getSystemClipboard();
+                final ClipboardContent content = new ClipboardContent();
+                content.putString(document.getViewerCode());
+                clipboard.setContent(content);
+                System.out.println("Viewer code copied: " + document.getViewerCode());
+            }
+        });
+        
+        topBox.getChildren().add(buttonBox);
     }
 
     public static void main(String[] args) {
