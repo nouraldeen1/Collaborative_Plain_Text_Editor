@@ -36,7 +36,7 @@ public class CollaborativeServer {
                             ChannelPipeline pipeline = ch.pipeline();
                             pipeline.addLast(new StringDecoder());
                             pipeline.addLast(new StringEncoder());
-                            pipeline.addLast(new ClientHandler(CollaborativeServer.this));
+                            pipeline.addLast(new ClientHandler(sessions)); // Corrected line
                         }
                     })
                     .option(ChannelOption.SO_BACKLOG, 128)
@@ -51,29 +51,9 @@ public class CollaborativeServer {
         }
     }
 
-    // Create a new session and document
-    public String[] createSession() {
-        String editorCode = UUID.randomUUID().toString();
-        String viewerCode = UUID.randomUUID().toString();
-        Document document = new Document(editorCode, viewerCode);
-        Session session = new Session(document);
-        sessions.put(editorCode, session);
-        sessions.put(viewerCode, session);
-        return new String[]{editorCode, viewerCode};
-    }
-
-    // Get session by code
-    public Session getSession(String code) {
-        return sessions.get(code);
-    }
-
-    // Remove a session
-    public void removeSession(String editorCode, String viewerCode) {
-        sessions.remove(editorCode);
-        sessions.remove(viewerCode);
-    }
-
     public static void main(String[] args) throws InterruptedException {
-        new CollaborativeServer(8080).start();
+        int port = 8080;
+        CollaborativeServer server = new CollaborativeServer(port);
+        server.start();
     }
 }

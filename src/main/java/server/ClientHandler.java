@@ -1,40 +1,39 @@
 package server;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import model.Document;
 import model.Operation;
 import model.User;
-
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import java.awt.Color;
 import java.util.List;
-
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+// Add this line
+import client.ClientMessage;
 public class ClientHandler extends SimpleChannelInboundHandler<String> {
-    private final CollaborativeServer server;
     private Session session;
     private String userID;
-    private User user;
-    private static final ObjectMapper mapper = new ObjectMapper();
-    private static final Color[] COLORS = {Color.RED, Color.BLUE, Color.GREEN, Color.YELLOW}; // Up to 4 users
-
-    public ClientHandler(CollaborativeServer server) {
-        this.server = server;
-    }
-
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) {
-        // Client connected, wait for join message
-        System.out.println("Client connected: " + ctx.channel().remoteAddress());
+    private final Map<String, Session> sessions;
+    private ObjectMapper mapper = new ObjectMapper();
+    
+        public ClientHandler(Map<String, Session> sessions) {
+            this.sessions = sessions;
+            this.mapper = new ObjectMapper();
+        
+        // Make the mapper more tolerant
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, String msg) {
         try {
-            // Parse incoming JSON message
             Message message = mapper.readValue(msg, Message.class);
-            String type = message.type;
 
-            switch (type) {
+            switch (message.type) {
                 case "join":
                     handleJoin(ctx, message);
                     break;
@@ -42,16 +41,18 @@ public class ClientHandler extends SimpleChannelInboundHandler<String> {
                     handleOperation(message);
                     break;
                 case "cursor":
-                    handleCursorUpdate(message);
+                    handleCursor(message);
                     break;
-                case "reconnect":
-                    handleReconnect(ctx, message);
+                case "create":
+                    handleCreate(ctx, message);
                     break;
                 default:
-                    System.err.println("Unknown message type: " + type);
+                    System.err.println("Unknown message type: " + message.type);
             }
         } catch (Exception e) {
             System.err.println("Error processing message: " + e.getMessage());
+            System.err.println("Message content: " + (msg != null ? msg.substring(0, Math.min(50, msg.length())) : "null"));
+            e.printStackTrace();
         }
     }
 
@@ -70,117 +71,123 @@ public class ClientHandler extends SimpleChannelInboundHandler<String> {
     }
 
     private void handleJoin(ChannelHandlerContext ctx, Message message) {
-        String code = message.code;
-        userID = message.userID;
-        boolean isEditor = message.isEditor;
-        session = server.getSession(code);
+        try {
+            String code = message.sessionId;
+            userID = message.userId;
+            boolean isEditor = message.isEditor;
 
-        if (session != null) {
-            // Assign a color (cycling through COLORS)
-            Color color = COLORS[session.getDocument().getActiveUsers().size() % COLORS.length];
-            user = new User(userID, color, isEditor);
-            session.addClient(this, user);
-
-            // Send document content and user list
-            sendDocument(ctx);
-            sendUserList(session.getDocument().getActiveUsers().stream().map(User::getUserID).toList());
-        } else {
-            ctx.write("{\"type\":\"error\",\"message\":\"Invalid session code\"}");
-            ctx.close();
-        }
-    }
-
-    private void handleOperation(Message message) throws Exception {
-        Operation operation = mapper.readValue(message.data, Operation.class);
-        if (user.isEditor()) {
-            session.broadcastOperation(operation, userID);
-        }
-    }
-
-    private void handleCursorUpdate(Message message) {
-        int position = Integer.parseInt(message.data);
-        user.setCursorPosition(position);
-        session.broadcastCursorUpdate(userID, position);
-    }
-
-    private void handleReconnect(ChannelHandlerContext ctx, Message message) {
-        userID = message.userID;
-        String code = message.code;
-        session = server.getSession(code);
-
-        if (session != null) {
-            List<Operation> missedOperations = session.reconnect(userID, this);
-            if (missedOperations != null) {
-                // Send missed operations
-                for (Operation op : missedOperations) {
-                    sendOperation(op);
+            for (Session s : sessions.values()) {
+                if (s.matchesCode(code)) {
+                    session = s;
+                    User user = new User(userID, generateUserColor(), isEditor);
+                    session.addClient(userID, ctx.channel(), user);
+                    System.out.println("User " + userID + " joined session " + code);
+                    return;
                 }
-                // Send current document and user list
-                sendDocument(ctx);
-                sendUserList(session.getDocument().getActiveUsers().stream().map(User::getUserID).toList());
-            } else {
-                ctx.write("{\"type\":\"error\",\"message\":\"Reconnection window expired\"}");
-                ctx.close();
             }
-        } else {
-            ctx.write("{\"type\":\"error\",\"message\":\"Invalid session code\"}");
-            ctx.close();
-        }
-    }
 
-    public void sendOperation(Operation operation) {
-        try {
-            String json = mapper.writeValueAsString(new Message("operation", mapper.writeValueAsString(operation)));
-            channelHandlerContext().writeAndFlush(json);
+            sendError(ctx, "No session found with code: " + code);
         } catch (Exception e) {
-            System.err.println("Error sending operation: " + e.getMessage());
+            sendError(ctx, "Error joining session: " + e.getMessage());
         }
     }
 
-    public void sendCursorUpdate(String userID, int position) {
+    private void handleCursor(Message message) {
+        if (session != null) {
+            try {
+                int position = Integer.parseInt(message.data);
+                session.updateCursor(userID, position);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid cursor position: " + message.data);
+            }
+        }
+    }
+
+    private void handleOperation(Message message) {
+        if (session != null) {
+            try {
+                Operation operation = mapper.readValue(message.data, Operation.class);
+                session.applyOperation(operation);
+            } catch (Exception e) {
+                System.err.println("Error processing operation: " + e.getMessage());
+            }
+        }
+    }
+
+    private void handleCreate(ChannelHandlerContext ctx, Message message) {
         try {
-            String json = mapper.writeValueAsString(new Message("cursor", userID + ":" + position));
-            channelHandlerContext().writeAndFlush(json);
+            System.out.println("Handling create session request from user: " + message.userId);
+            userID = message.userId;
+            boolean isEditor = message.isEditor;
+            
+            // Create a new session
+            Session newSession = new Session();
+            sessions.put(newSession.getEditorCode(), newSession);
+            
+            // Add the user to the session
+            User user = new User(userID, generateUserColor(), isEditor);
+            session = newSession;
+            session.addClient(userID, ctx.channel(), user);
+            
+            // Send document to client
+            try {
+                Document doc = newSession.getDocument();
+                System.out.println("New session document: Editor=" + doc.getEditorCode() + ", Viewer=" + doc.getViewerCode());
+                
+                String documentJson = mapper.writeValueAsString(doc);
+                System.out.println("Sending document JSON to client: " + documentJson);
+                
+                Message responseMsg = new Message("document", null, null, documentJson, false);
+                String responseStr = mapper.writeValueAsString(responseMsg);
+                System.out.println("Full response message: " + responseStr);
+                
+                ctx.writeAndFlush(responseStr);
+            } catch (Exception e) {
+                System.err.println("Error sending document to client: " + e.getMessage());
+                e.printStackTrace();
+            }
+            
+            System.out.println("New session created with editor code: " + newSession.getEditorCode() + 
+                              ", viewer code: " + newSession.getViewerCode());
         } catch (Exception e) {
-            System.err.println("Error sending cursor update: " + e.getMessage());
+            System.err.println("Error creating session: " + e.getMessage());
+            e.printStackTrace();
+            sendError(ctx, "Error creating session: " + e.getMessage());
         }
     }
 
-    public void sendUserList(List<String> userIDs) {
+    private Color generateUserColor() {
+        return new Color(
+                (int)(Math.random() * 200 + 55),
+                (int)(Math.random() * 200 + 55),
+                (int)(Math.random() * 200 + 55)
+        );
+    }
+
+    private void sendError(ChannelHandlerContext ctx, String errorMessage) {
         try {
-            String json = mapper.writeValueAsString(new Message("userList", mapper.writeValueAsString(userIDs)));
-            channelHandlerContext().writeAndFlush(json);
+            Message errorMsg = new Message("error", null, null, errorMessage, false);
+            ctx.writeAndFlush(mapper.writeValueAsString(errorMsg));
         } catch (Exception e) {
-            System.err.println("Error sending user list: " + e.getMessage());
+            System.err.println("Failed to send error message: " + e.getMessage());
         }
     }
 
-    private void sendDocument(ChannelHandlerContext ctx) {
-        try {
-            String json = mapper.writeValueAsString(new Message("document", session.getDocument().getText()));
-            ctx.writeAndFlush(json);
-        } catch (Exception e) {
-            System.err.println("Error sending document: " + e.getMessage());
-        }
-    }
-
-    private ChannelHandlerContext channelHandlerContext() {
-        return null; // Placeholder; Netty provides this in actual context
-    }
-
-    // Message class for JSON parsing
-    private static class Message {
+    public static class Message {
         public String type;
-        public String code;
-        public String userID;
+        public String sessionId;
+        public String userId;
         public String data;
         public boolean isEditor;
 
         public Message() {}
 
-        public Message(String type, String data) {
+        public Message(String type, String sessionId, String userId, String data, boolean isEditor) {
             this.type = type;
+            this.sessionId = sessionId;
+            this.userId = userId;
             this.data = data;
+            this.isEditor = isEditor;
         }
     }
 }

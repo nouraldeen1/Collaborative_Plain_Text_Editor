@@ -1,6 +1,5 @@
 package crdt;
 
-import model.CRDVNode;
 import model.Document;
 import model.Operation;
 import model.User;
@@ -15,41 +14,41 @@ public class CRDTManager {
         this.document = document;
         this.userHistory = new UserHistory();
     }
-
+    
     // Insert a character at a given position
     public Operation insert(char character, int position, User user) {
-        String identifier = generateIdentifier(user.getUserID(), position);
+        String identifier = generateIdentifier(user.getUserId(), position);
+        
+        // Create operation with identifier
+        Operation operation = new Operation("insert", position, String.valueOf(character), user.getUserId(), identifier);
+        userHistory.addOperation(operation, user.getUserId());
+        
+        // Apply to CRDT model
         CRDVNode node = new CRDVNode(character, identifier);
         document.addNode(node);
-
-        Operation operation = new Operation("insert", character, identifier, position, user.getUserID());
-        userHistory.addOperation(operation, user.getUserID());
+        
         return operation;
     }
 
     // Delete a character at a given position
     public Operation delete(int position, User user) {
         String identifier = findIdentifierAtPosition(position);
-        if (identifier != null) {
-            document.deleteNode(identifier);
-            Operation operation = new Operation("delete", '\0', identifier, position, user.getUserID());
-            userHistory.addOperation(operation, user.getUserID());
-            return operation;
+        if (identifier == null) {
+            return null; // Nothing to delete
         }
-        return null; // No character to delete
+        
+        // Create operation with identifier
+        Operation operation = new Operation("delete", position, String.valueOf(document.getContent().get(identifier).getCharacter()), user.getUserId(), identifier);
+        userHistory.addOperation(operation, user.getUserId());
+        
+        // Apply to CRDT model
+        document.deleteNode(identifier);
+        
+        return operation;
     }
 
-    // Paste text as multiple insertions
-    public Operation[] paste(String text, int position, User user) {
-        Operation[] operations = new Operation[text.length()];
-        for (int i = 0; i < text.length(); i++) {
-            operations[i] = insert(text.charAt(i), position + i, user);
-        }
-        return operations;
-    }
-
-    // Apply a remote operation (from another user)
-    public void applyOperation(Operation operation) {
+    // Apply a remote operation
+    public void applyRemoteOperation(Operation operation) {
         if ("insert".equals(operation.getType())) {
             CRDVNode node = new CRDVNode(operation.getCharacter(), operation.getIdentifier());
             document.addNode(node);
@@ -60,7 +59,7 @@ public class CRDTManager {
 
     // Undo the last operation for a user
     public Operation undo(User user) {
-        Operation operation = userHistory.undo(user.getUserID());
+        Operation operation = userHistory.undo(user.getUserId());
         if (operation != null) {
             if ("insert".equals(operation.getType())) {
                 // Undo insert by marking as deleted
@@ -70,49 +69,51 @@ public class CRDTManager {
                 CRDVNode node = document.getContent().get(operation.getIdentifier());
                 if (node != null) {
                     node.setDeleted(false);
+                    document.updateText();  // Call updateText which is now private
                 }
             }
+            return operation;
         }
-        return operation;
+        return null;
     }
 
-    // Redo the last undone operation for a user
+    private String generateIdentifier(String userId, int position) {
+        return userId + "-" + UUID.randomUUID().toString();
+    }
+
+    private String findIdentifierAtPosition(int position) {
+        // This is a simplified implementation
+        // In a real implementation, you would need to map positions to identifiers
+        return null;
+    }
+    public Operation[] paste(String content, int position, User user) {
+        Operation[] operations = new Operation[content.length()];
+        for (int i = 0; i < content.length(); i++) {
+            operations[i] = insert(content.charAt(i), position + i, user);
+        }
+        return operations;
+    }
     public Operation redo(User user) {
-        Operation operation = userHistory.redo(user.getUserID());
+        Operation operation = userHistory.redo(user.getUserId());
         if (operation != null) {
             if ("insert".equals(operation.getType())) {
-                // Redo insert by adding the node again
+                // Redo insert by adding the node back
                 CRDVNode node = new CRDVNode(operation.getCharacter(), operation.getIdentifier());
                 document.addNode(node);
             } else if ("delete".equals(operation.getType())) {
-                // Redo delete by marking as deleted
+                // Redo delete by marking as deleted again
                 document.deleteNode(operation.getIdentifier());
             }
+            return operation;
         }
-        return operation;
+        return null;
     }
-
-    // Generate a unique identifier for a CRDT node
-    private String generateIdentifier(String userID, int position) {
-        return userID + ":" + System.nanoTime() + ":" + position + ":" + UUID.randomUUID().toString();
-    }
-
-    // Find the identifier of the character at a given position
-    private String findIdentifierAtPosition(int position) {
-        int currentPos = 0;
-        for (CRDVNode node : document.getContent().values()) {
-            if (!node.isDeleted()) {
-                if (currentPos == position) {
-                    return node.getIdentifier();
-                }
-                currentPos++;
-            }
+    public void applyOperation(Operation operation) {
+        if ("insert".equals(operation.getType())) {
+            CRDVNode node = new CRDVNode(operation.getCharacter(), operation.getIdentifier());
+            document.addNode(node);
+        } else if ("delete".equals(operation.getType())) {
+            document.deleteNode(operation.getIdentifier());
         }
-        return null; // Position out of bounds
-    }
-
-    // Get the current document
-    public Document getDocument() {
-        return document;
     }
 }

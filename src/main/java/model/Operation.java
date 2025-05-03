@@ -1,49 +1,46 @@
 package model;
 
 public class Operation {
-    private String type;       // "insert" or "delete"
-    private char character;    // Character for insert operations
-    private String identifier; // CRDT node identifier
-    private int position;      // Position in the document (for UI rendering)
-    private String userID;     // User who performed the operation
+    private String type; // "insert" or "delete"
+    private int position;
+    private String content;
+    private String userId;
+    private String identifier;  // Added for CRDT
 
-    public Operation(String type, char character, String identifier, int position, String userID) {
+    public Operation() {}
+
+    public Operation(String type, int position, String content, String userId) {
         this.type = type;
-        this.character = character;
-        this.identifier = identifier;
         this.position = position;
-        this.userID = userID;
+        this.content = content;
+        this.userId = userId;
     }
 
-    // Getters
-    public String getType() {
-        return type;
+    // Additional constructor for CRDT operations
+    public Operation(String type, int position, String content, String userId, String identifier) {
+        this.type = type;
+        this.position = position;
+        this.content = content;
+        this.userId = userId;
+        this.identifier = identifier;
     }
+
+    public String getType() { return type; }
+    public void setType(String type) { this.type = type; }
+
+    public int getPosition() { return position; }
+    public void setPosition(int position) { this.position = position; }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    public String getIdentifier() { return identifier; }
+    public void setIdentifier(String identifier) { this.identifier = identifier; }
 
     public char getCharacter() {
-        return character;
-    }
-
-    public String getIdentifier() {
-        return identifier;
-    }
-
-    public int getPosition() {
-        return position;
-    }
-
-    public String getUserID() {
-        return userID;
-    }
-
-    @Override
-    public String toString() {
-        return "Operation{" +
-               "type='" + type + '\'' +
-               ", character=" + character +
-               ", identifier='" + identifier + '\'' +
-               ", position=" + position +
-               ", userID='" + userID + '\'' +
-               '}';
+        return content != null && !content.isEmpty() ? content.charAt(0) : '\0';
     }
 }

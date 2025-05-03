@@ -22,6 +22,9 @@ import model.User;
 import util.FileUtil;
 import util.JsonUtil;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.io.File;
 import java.util.HashMap;
 import java.util.List;
@@ -45,7 +48,7 @@ public class EditorUI extends Application {
         String userID = UUID.randomUUID().toString();
         isEditor = true; // Default to editor; set to false for viewer via UI
         client = new CollaborativeClient("localhost", 8080, userID, isEditor);
-        document = new Document(null, null); // Codes set after joining
+        document = new Document("", null, null); // Empty text, codes set after joining
         crdtManager = new CRDTManager(document);
         cursors = new HashMap<>();
 
@@ -60,7 +63,8 @@ public class EditorUI extends Application {
         codeField.setPromptText("Enter session code");
         Button newSessionButton = new Button("New Session");
         HBox joinBox = new HBox(10, new Label("Code:"), codeField, joinButton, newSessionButton);
-
+                // In start() method
+        document = new Document("", null, null); // Text and codes to be set later
         // Menu for import/export
         MenuBar menuBar = new MenuBar();
         Menu fileMenu = new Menu("File");
@@ -162,51 +166,68 @@ public class EditorUI extends Application {
     private void joinSession(String code) {
         try {
             client.joinSession(code);
-            
-            // Set up callbacks to receive document information from server
+
             client.setDocumentCallback(documentText -> {
                 try {
-                    document = JsonUtil.fromJson(documentText, Document.class);
+                    Document document = JsonUtil.fromJson(documentText, Document.class);
                     Platform.runLater(() -> {
                         textArea.setText(document.getText());
-                        
-                        // Print session codes to console for easy copying
-                        System.out.println("\n========== SESSION CODES ==========");
-                        System.out.println("Editor Code: " + document.getEditorCode());
-                        System.out.println("Viewer Code: " + document.getViewerCode());
-                        System.out.println("==================================\n");
-                        
-                        // Update UI with codes
-                        codeLabel.setText("Editor: " + document.getEditorCode() + 
-                                         " | Viewer: " + document.getViewerCode());
+                        codeLabel.setText("Editor: " + document.getEditorCode() + " | Viewer: " + document.getViewerCode());
                     });
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
-            
-            // Setup other callbacks if needed
+
             client.setOperationCallback(operation -> {
                 // Handle incoming operations
             });
-            
+
             client.setCursorCallback((userId, position) -> {
                 // Handle cursor updates
             });
-            
+
         } catch (Exception e) {
             Platform.runLater(() -> showError("Failed to join session: " + e.getMessage()));
         }
     }
 
     private void createSession() {
-        // Simulate server response for new session
-        String editorCode = UUID.randomUUID().toString();
-        String viewerCode = UUID.randomUUID().toString();
-        document = new Document(editorCode, viewerCode);
-        crdtManager = new CRDTManager(document);
-        codeLabel.setText("Editor Code: " + editorCode + "\nViewer Code: " + viewerCode);
-        // In a real implementation, request codes from the server
+        try {
+            System.out.println("Setting up document callback");
+            client.setDocumentCallback(documentText -> {
+                System.out.println("Document callback received: " + documentText);
+                try {
+                    document = JsonUtil.fromJson(documentText, Document.class);
+                    System.out.println("Parsed document: Editor=" + document.getEditorCode() + ", Viewer=" + document.getViewerCode());
+                    
+                    Platform.runLater(() -> {
+                        System.out.println("Updating UI with document info");
+                        textArea.setText(document.getText());
+                        codeLabel.setText("Editor Code: " + document.getEditorCode() + " | Viewer Code: " + document.getViewerCode());
+                        
+                        System.out.println("\n========== SESSION CODES ==========");
+                        System.out.println("Editor Code: " + document.getEditorCode());
+                        System.out.println("Viewer Code: " + document.getViewerCode());
+                        System.out.println("==================================\n");
+                    });
+                    
+                    crdtManager = new CRDTManager(document);
+                } catch (Exception e) {
+                    System.err.println("Error processing document: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            });
+            
+            System.out.println("Creating session via client");
+            client.createSession();
+            System.out.println("Session creation request sent");
+            
+        } catch (Exception e) {
+            System.err.println("Error creating session: " + e.getMessage());
+            e.printStackTrace();
+            Platform.runLater(() -> showError("Failed to create session: " + e.getMessage()));
+        }
     }
 
     private void importFile(Stage stage) {
@@ -335,5 +356,12 @@ public class EditorUI extends Application {
 
     public static void main(String[] args) {
         launch(args);
+    }
+    public static String importFile(String path) throws IOException {
+        return new String(Files.readAllBytes(Paths.get(path)));
+    }
+    
+    public static void exportFile(String path, String content) throws IOException {
+        Files.write(Paths.get(path), content.getBytes());
     }
 }

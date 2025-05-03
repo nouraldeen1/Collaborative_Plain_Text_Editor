@@ -1,6 +1,5 @@
 package client;
 
-import com.fasterxml.jackson.annotation.JacksonInject.Value;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -12,22 +11,9 @@ import io.netty.handler.codec.string.StringEncoder;
 import model.Operation;
 import model.User;
 import util.JsonUtil;
-import java.security.Key;
-import java.util.List;
-import java.util.UUID;
-import java.util.function.Consumer;
-import java.util.function.BiConsumer;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import com.fasterxml.jackson.core.type.TypeReference;
-import java.util.List;
-import java.util.function.Consumer;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.BiConsumer;
-import com.fasterxml.jackson.core.type.TypeReference;
-
 public class CollaborativeClient {
     private final String host;
     private final int port;
@@ -81,63 +67,83 @@ public class CollaborativeClient {
         }
     }
 
+    public void createSession() throws Exception {
+        System.out.println("Sending create session request to server...");
+        ClientMessage message = new ClientMessage("create", null, user.getUserId(), null, user.isEditor());
+        sendMessage(message);
+    }
+
     public void joinSession(String code) throws Exception {
-        ClientMessage message = new ClientMessage("join", code, user.getUserID(), null, user.isEditor());
+        ClientMessage message = new ClientMessage("join", code, user.getUserId(), null, user.isEditor());
         sendMessage(message);
     }
 
     public void reconnect(String code) throws Exception {
-        ClientMessage message = new ClientMessage("reconnect", code, user.getUserID(), null, user.isEditor());
+        ClientMessage message = new ClientMessage("reconnect", code, user.getUserId(), null, user.isEditor());
         sendMessage(message);
     }
-
+    
     public void sendOperation(Operation operation) throws Exception {
-        ClientMessage message = new ClientMessage("operation", null, user.getUserID(), JsonUtil.toJson(operation), user.isEditor());
+        ClientMessage message = new ClientMessage("operation", null, user.getUserId(), JsonUtil.toJson(operation), user.isEditor());
         sendMessage(message);
     }
-
+    
     public void sendCursorUpdate(int position) throws Exception {
-        ClientMessage message = new ClientMessage("cursor", null, user.getUserID(), String.valueOf(position), user.isEditor());
+        ClientMessage message = new ClientMessage("cursor", null, user.getUserId(), String.valueOf(position), user.isEditor());
         sendMessage(message);
     }
 
     private void sendMessage(ClientMessage message) throws Exception {
         if (channel != null && channel.isActive()) {
-            channel.writeAndFlush(JsonUtil.toJson(message));
+            String json = JsonUtil.toJson(message);
+            System.out.println("Sending message to server: " + json);
+            channel.writeAndFlush(json);
+        } else {
+            System.err.println("Cannot send message: channel is null or inactive");
+            throw new IllegalStateException("Not connected to server");
         }
     }
 
     private void handleMessage(String msg) throws Exception {
-        ClientMessage message = JsonUtil.fromJson(msg, ClientMessage.class);
-        switch (message.type) {
-            case "operation":
-                Operation operation = JsonUtil.fromJson(message.data, Operation.class);
-                if (operationCallback != null) {
-                    operationCallback.accept(operation);
-                }
-                break;
-            case "document":
-                if (documentCallback != null) {
-                    documentCallback.accept(message.data);
-                }
-                break;
-            case "userList":
-                List<String> userIDs = JsonUtil.fromJson(message.data, new TypeReference<List<String>>(){});
-                if (userListCallback != null) {
-                    userListCallback.accept(userIDs);
-                }
-                break;
-            case "cursor":
-                if (cursorCallback != null) {
-                    // Parse the position from message.data
-                    int position = Integer.parseInt(message.data);
-                    // Pass both the user ID and position
-                    cursorCallback.accept(message.userID, position);
-                }
-                break;
-            case "error":
-                System.err.println("Server error: " + message.data);
-                break;
+        System.out.println("Received message from server: " + msg);
+        try {
+            ClientMessage message = JsonUtil.fromJson(msg, ClientMessage.class);
+            switch (message.type) {
+                case "operation":
+                    Operation operation = JsonUtil.fromJson(message.data, Operation.class);
+                    if (operationCallback != null) {
+                        operationCallback.accept(operation);
+                    }
+                    break;
+                case "document":
+                    System.out.println("Received document from server");
+                    if (documentCallback != null) {
+                        System.out.println("Calling document callback");
+                        documentCallback.accept(message.data);
+                    } else {
+                        System.err.println("Document callback is null");
+                    }
+                    break;
+                case "userList":
+                    List<String> userIDs = JsonUtil.fromJson(message.data, new TypeReference<List<String>>(){});
+                    if (userListCallback != null) {
+                        userListCallback.accept(userIDs);
+                    }
+                    break;
+                case "cursor":
+                    if (cursorCallback != null) {
+                        // Parse the position from message.data
+                        int position = Integer.parseInt(message.data);
+                        // Pass both the user ID and position
+                        cursorCallback.accept(message.userId, position);                }
+                    break;
+                case "error":
+                    System.err.println("Server error: " + message.data);
+                    break;
+            }
+        } catch (Exception e) {
+            System.err.println("Error handling message: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

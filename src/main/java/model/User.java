@@ -3,21 +3,43 @@ package model;
 import java.awt.Color;
 
 public class User {
-    private String userID;         // Unique user identifier
-    private int cursorPosition;    // Current cursor position in the document
-    private Color cursorColor;     // Color for cursor display
-    private boolean isEditor;      // True for editors, false for viewers
+    private String userId;  // Changed from userID to userId for consistency
+    private Color color;
+    private boolean isEditor;
+    private int cursorPosition;
 
-    public User(String userID, Color cursorColor, boolean isEditor) {
-        this.userID = userID;
-        this.cursorPosition = 0; // Start at beginning of document
-        this.cursorColor = cursorColor;
-        this.isEditor = isEditor;
+    public User() {
     }
 
-    // Getters and setters
-    public String getUserID() {
-        return userID;
+    public User(String userId, Color color, boolean isEditor) {
+        this.userId = userId;
+        this.color = color;
+        this.isEditor = isEditor;
+        this.cursorPosition = 0;
+    }
+
+    public String getUserId() {  // Changed from getUserID to getUserId
+        return userId;
+    }
+ 
+    public void setUserId(String userId) {  // Changed from setUserID to setUserId
+        this.userId = userId;
+    }
+
+    public Color getColor() {
+        return color;
+    }
+
+    public void setColor(Color color) {
+        this.color = color;
+    }
+
+    public boolean isEditor() {
+        return isEditor;
+    }
+
+    public void setEditor(boolean editor) {
+        isEditor = editor;
     }
 
     public int getCursorPosition() {
@@ -26,26 +48,5 @@ public class User {
 
     public void setCursorPosition(int cursorPosition) {
         this.cursorPosition = cursorPosition;
-    }
-
-    public Color getCursorColor() {
-        return cursorColor;
-    }
-
-    public boolean isEditor() {
-        return isEditor;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        User user = (User) o;
-        return userID.equals(user.userID);
-    }
-
-    @Override
-    public int hashCode() {
-        return userID.hashCode();
     }
 }

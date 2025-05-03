@@ -1,70 +1,89 @@
 package model;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.TreeMap;
+import crdt.CRDVNode;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class Document {
-    private String editorCode;   // Unique code for editors
-    private String viewerCode;  // Unique code for read-only viewers
-    private TreeMap<String, CRDVNode> content; // CRDT structure (identifier -> node)
-    private Set<User> activeUsers; // Users currently in the session
+    private String text;
+    private String editorCode;
+    private String viewerCode;
+    private Map<String, CRDVNode> content;  // Added for CRDT
 
-    public Document(String editorCode, String viewerCode) {
+    public Document() {
+        this.text = "";
+        this.content = new HashMap<>();
+    }
+
+    public Document(String text, String editorCode, String viewerCode) {
+        this.text = text;
         this.editorCode = editorCode;
         this.viewerCode = viewerCode;
-        this.content = new TreeMap<>(); // Ordered by identifier for CRDT
-        this.activeUsers = new HashSet<>();
+        this.content = new HashMap<>();
     }
 
-    // Add a character to the document
-    public void addNode(CRDVNode node) {
-        content.put(node.getIdentifier(), node);
+    public String getText() {
+        return text;
     }
 
-    // Mark a character as deleted
-    public void deleteNode(String identifier) {
-        CRDVNode node = content.get(identifier);
-        if (node != null) {
-            node.setDeleted(true);
-        }
+    public void setText(String text) {
+        this.text = text;
     }
 
-    // Add a user to the session
-    public void addUser(User user) {
-        activeUsers.add(user);
-    }
-
-    // Remove a user from the session
-    public void removeUser(User user) {
-        activeUsers.remove(user);
-    }
-
-    // Getters
     public String getEditorCode() {
         return editorCode;
+    }
+
+    public void setEditorCode(String editorCode) {
+        this.editorCode = editorCode;
     }
 
     public String getViewerCode() {
         return viewerCode;
     }
 
-    public TreeMap<String, CRDVNode> getContent() {
+    public void setViewerCode(String viewerCode) {
+        this.viewerCode = viewerCode;
+    }
+
+    public Map<String, CRDVNode> getContent() {
         return content;
     }
 
-    public Set<User> getActiveUsers() {
-        return activeUsers;
+    public void addNode(CRDVNode node) {
+        content.put(node.getIdentifier(), node);
+        updateText();
     }
 
-    // Get document text (visible characters only)
-    public String getText() {
-        StringBuilder text = new StringBuilder();
-        for (CRDVNode node : content.values()) {
-            if (!node.isDeleted()) {
-                text.append(node.getValue());
+    public void deleteNode(String identifier) {
+        CRDVNode node = content.get(identifier);
+        if (node != null) {
+            node.setDeleted(true);
+            updateText();
+        }
+    }
+
+    public void applyOperation(Operation operation) {
+        if ("insert".equals(operation.getType())) {
+            text = text.substring(0, operation.getPosition()) + operation.getContent() + text.substring(operation.getPosition());
+        } else if ("delete".equals(operation.getType())) {
+            int end = operation.getPosition() + operation.getContent().length();
+            if (end <= text.length()) {
+                text = text.substring(0, operation.getPosition()) + text.substring(end);
             }
         }
-        return text.toString();
+    }
+
+    public void updateText() {
+        StringBuilder sb = new StringBuilder();
+        // Build text from non-deleted nodes
+        // This is a simplified version - you would need to sort nodes by position
+        for (CRDVNode node : content.values()) {
+            if (!node.isDeleted()) {
+                sb.append(node.getCharacter());
+            }
+        }
+        text = sb.toString();
     }
 }
