@@ -22,6 +22,15 @@ import model.User;
 import util.FileUtil;
 import util.JsonUtil;
 
+import javafx.geometry.Bounds;
+import javafx.geometry.BoundingBox;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.text.Text;
+import javafx.scene.layout.StackPane;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -42,6 +51,7 @@ public class EditorUI extends Application {
     private Map<String, Rectangle> cursors; // Maps userID to cursor rectangle
     private boolean isEditor;
     private boolean updatingTextArea = false;
+    private String lastKnownText = "";
 
     @Override
     public void start(Stage primaryStage) {
@@ -52,6 +62,16 @@ public class EditorUI extends Application {
         document = new Document("", null, null); // Empty text, codes set after joining
         crdtManager = new CRDTManager(document);
         cursors = new HashMap<>();
+
+// In your start() method or UI setup
+        textArea = new TextArea();
+        cursors = new HashMap<>();
+
+        // Wrap textArea in a StackPane for cursor overlays
+        StackPane textAreaContainer = new StackPane();
+        textAreaContainer.getChildren().add(textArea);
+
+        // Use textAreaContainer in your layout instead of textArea directly
 
         // UI components
         BorderPane root = new BorderPane();
@@ -242,80 +262,174 @@ public class EditorUI extends Application {
         }
     }
     
-    // Helper method to apply an insert operation
-    private void applyInsert(Operation operation) {
-        if (updatingTextArea) return;
-        
-        updatingTextArea = true;
-        try {
-            String currentText = textArea.getText();
-            int position = Math.min(operation.getPosition(), currentText.length());
-            String newText = currentText.substring(0, position) + 
-                             operation.getContent() + 
-                             currentText.substring(position);
-            
-            textArea.setText(newText);
-            
-            // Update our document model
-            if (document != null) {
-                document.setText(newText);
-            }
-            
-            System.out.println("Applied insert operation: '" + operation.getContent() + 
-                               "' at position " + position);
-        } finally {
-            updatingTextArea = false;
-        }
-    }
     
-    // Helper method to apply a delete operation
-    private void applyDelete(Operation operation) {
-        if (updatingTextArea) return;
-        
-        updatingTextArea = true;
-        try {
-            String currentText = textArea.getText();
-            int position = operation.getPosition();
-            int length = operation.getContent().length();
-            
-            if (position >= 0 && position < currentText.length()) {
-                int endPos = Math.min(position + length, currentText.length());
-                String newText = currentText.substring(0, position) + 
-                                 currentText.substring(endPos);
-                
-                textArea.setText(newText);
-                
-                // Update our document model
-                if (document != null) {
-                    document.setText(newText);
-                }
-                
-                System.out.println("Applied delete operation: removed '" + 
-                                   operation.getContent() + "' from position " + position);
-            }
-        } finally {
-            updatingTextArea = false;
-        }
-    }
     
+   
     // Helper method to update cursor display for other users
     private void updateCursor(String userId, int position) {
-        // Implement cursor highlighting for other users
-        System.out.println("Updating cursor for user " + userId + " at position " + position);
-        
-        // This would typically involve highlighting the cursor position in the text area
-        // You might use a custom TextArea implementation or a different approach
+        Platform.runLater(() -> {
+            // Remove old cursor display for this user if it exists
+            Rectangle oldCursor = cursors.get(userId);
+            if (oldCursor != null) {
+                textArea.getParent().getChildrenUnmodifiable().remove(oldCursor);
+            }
+
+            try {
+                // Don't show cursor for the current user (we already have the blinking cursor)
+                if (userId.equals(client.getUser().getUserId())) {
+                    return;
+                }
+                
+                // Calculate position in the UI for the cursor
+                IndexRange range = new IndexRange(position, position);
+                Bounds bounds = getTextBounds(textArea, range);
+                
+                if (bounds != null) {
+                    // Create or update cursor display
+                    Rectangle cursorRect = new Rectangle(2, bounds.getHeight());
+                    
+                    // Get user-specific color (or generate one)
+                    Color userColor = getUserColor(userId);
+                    cursorRect.setFill(javafx.scene.paint.Color.web(userColor.toString()));
+                    
+                    // Position the cursor
+                    StackPane textAreaContainer = new StackPane();
+                    textAreaContainer.getChildren().addAll(textArea, cursorRect);
+                    
+                    // Position cursor at the right spot
+                    cursorRect.setTranslateX(bounds.getMinX());
+                    cursorRect.setTranslateY(bounds.getMinY());
+                    
+                    // Store reference to remove later
+                    cursors.put(userId, cursorRect);
+                    
+                    System.out.println("Updated cursor for user " + userId + " at position " + position);
+                }
+            } catch (Exception e) {
+                System.err.println("Error updating cursor: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
     }
-    
-    // Helper method to update the user list
-    private void refreshUserList(List<String> userIds) {
-        System.out.println("Updating user list with: " + userIds);
-        // Update your UI component that shows the list of users
-        userList.getItems().clear();
-        for (String userId : userIds) {
-            userList.getItems().add(userId);
+
+    // Helper method to get text bounds at a specific position
+    private Bounds getTextBounds(TextArea textArea, IndexRange range) {
+        try {
+            Text text = new Text(textArea.getText(0, range.getStart()));
+            text.setFont(textArea.getFont());
+            double width = text.getLayoutBounds().getWidth();
+            
+            // Calculate line and column
+            String fullText = textArea.getText();
+            int lineCount = 0;
+            int position = 0;
+            
+            // Find the line containing the position
+            while (position <= range.getStart() && position < fullText.length()) {
+                int nextNewline = fullText.indexOf('\n', position);
+                if (nextNewline != -1 && nextNewline < range.getStart()) {
+                    lineCount++;
+                    position = nextNewline + 1;
+                } else {
+                    break;
+                }
+            }
+            
+            // Calculate column in the current line
+            int column = range.getStart() - position;
+            
+            // Calculate position in the text area
+            double lineHeight = textArea.getFont().getSize() * 1.2; // Approximate line height
+            double x = 5 + column * 7; // Approximate character width
+            double y = 5 + lineCount * lineHeight;
+            
+            return new BoundingBox(x, y, 0, lineHeight);
+        } catch (Exception e) {
+            System.err.println("Error calculating text bounds: " + e.getMessage());
+            return null;
         }
     }
+
+    // Get color for user (store in a map to keep consistent colors)
+    private Map<String, Color> userColors = new HashMap<>();
+    private Color getUserColor(String userId) {
+        return userColors.computeIfAbsent(userId, id -> {
+            // Generate a random bright color
+            Random random = new Random(id.hashCode());
+            return Color.rgb(
+                50 + random.nextInt(150),  // Red component
+                50 + random.nextInt(150),  // Green component
+                50 + random.nextInt(150)   // Blue component
+            );
+        });
+    }
+
+    // Helper method to update the user list with real-time presence
+    private void refreshUserList(List<String> userIds) {
+        Platform.runLater(() -> {
+            System.out.println("Updating user list with: " + userIds);
+            
+            // Clear current list
+            userList.getItems().clear();
+            
+            // Add all users with their status
+            for (String userId : userIds) {
+                String displayName = userId;
+                
+                // Highlight current user
+                if (userId.equals(client.getUser().getUserId())) {
+                    displayName = "→ YOU (" + userId + ")";
+                }
+                
+                // Show if user is actively typing (update this based on cursor activity)
+                boolean isTyping = lastTypingTime.containsKey(userId) && 
+                                   System.currentTimeMillis() - lastTypingTime.get(userId) < 3000;
+                
+                if (isTyping) {
+                    displayName += " (typing...)";
+                }
+                
+                // Add to list with custom cell rendering
+                userList.getItems().add(displayName);
+                
+                // Get corresponding cell and style it with user's color
+                int index = userList.getItems().size() - 1;
+                userList.setCellFactory(lv -> new ListCell<String>() {
+                    @Override
+                    protected void updateItem(String item, boolean empty) {
+                        super.updateItem(item, empty);
+                        
+                        if (empty || item == null) {
+                            setText(null);
+                            setGraphic(null);
+                        } else {
+                            setText(item);
+                            
+                            // Get user ID from the item text
+                            String userIdFromItem = item;
+                            if (item.contains("(")) {
+                                userIdFromItem = item.substring(item.indexOf('(') + 1, item.indexOf(')'));
+                            }
+                            
+                            // Set color based on user ID
+                            Color userColor = getUserColor(userIdFromItem);
+                            setTextFill(javafx.scene.paint.Color.web(userColor.toString()));
+                            
+                            // Show typing indicator
+                            if (item.contains("typing")) {
+                                setStyle("-fx-font-style: italic;");
+                            } else {
+                                setStyle("");
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Track when users last typed something
+    private Map<String, Long> lastTypingTime = new HashMap<>();
 
     private void createSession() {
         try {
@@ -438,6 +552,9 @@ public class EditorUI extends Application {
             System.err.println("Error handling text change: " + e.getMessage());
             e.printStackTrace();
         }
+        
+        // Record typing activity for current user
+        lastTypingTime.put(client.getUser().getUserId(), System.currentTimeMillis());
     }
 
     // Helper method to find the index where two strings start to differ
@@ -452,10 +569,80 @@ public class EditorUI extends Application {
     }
 
     private void applyOperation(Operation operation) {
+        if (operation.getUserId().equals(client.getUser().getUserId())) {
+            System.out.println("Ignoring operation from self: " + operation.getType());
+            return; // Skip our own operations that come back
+        }
+        
+        System.out.println("Applying operation from " + operation.getUserId() + 
+                         ": " + operation.getType() + " at position " + operation.getPosition());
+        
         Platform.runLater(() -> {
-            crdtManager.applyOperation(operation);
-            updateTextArea();
+            if ("insert".equals(operation.getType())) {
+                applyInsert(operation);
+            } else if ("delete".equals(operation.getType())) {
+                applyDelete(operation);
+            }
         });
+    }
+
+    private void applyInsert(Operation operation) {
+        updatingTextArea = true;
+        try {
+            String currentText = textArea.getText();
+            int position = Math.min(operation.getPosition(), currentText.length());
+            
+            // Build new text
+            String newText = currentText.substring(0, position) + 
+                           operation.getContent() + 
+                           currentText.substring(position);
+            
+            // Update UI
+            textArea.setText(newText);
+            
+            // Update document and last known state
+            document.setText(newText);
+            lastKnownText = newText;
+            
+            System.out.println("Applied insert: '" + operation.getContent() + 
+                             "' at position " + position + 
+                             ", new text: '" + newText + "'");
+        } finally {
+            updatingTextArea = false;
+        }
+    }
+
+    private void applyDelete(Operation operation) {
+        updatingTextArea = true;
+        try {
+            String currentText = textArea.getText();
+            int position = operation.getPosition();
+            String content = operation.getContent();
+            
+            // Safety check
+            if (position < 0 || position >= currentText.length()) {
+                System.err.println("Invalid delete position: " + position);
+                return;
+            }
+            
+            // Build new text
+            int endPosition = Math.min(position + content.length(), currentText.length());
+            String newText = currentText.substring(0, position) + 
+                           currentText.substring(endPosition);
+            
+            // Update UI
+            textArea.setText(newText);
+            
+            // Update document and last known state
+            document.setText(newText);
+            lastKnownText = newText;
+            
+            System.out.println("Applied delete: '" + content + 
+                             "' at position " + position + 
+                             ", new text: '" + newText + "'");
+        } finally {
+            updatingTextArea = false;
+        }
     }
 
     private void updateDocument(String content) {
@@ -543,5 +730,84 @@ public class EditorUI extends Application {
     
     public static void exportFile(String path, String content) throws IOException {
         Files.write(Paths.get(path), content.getBytes());
+    }
+    
+    private void initializeTextArea() {
+        textArea = new TextArea();
+        
+        // Add change listener to detect user edits
+        textArea.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!updatingTextArea) {
+                handleTextChange(oldValue, newValue);
+            }
+        });
+        
+        // Initial empty state
+        lastKnownText = "";
+    }
+
+    // Improved text change handler
+    private void handleTextChange(String oldValue, String newValue) {
+        try {
+            // Skip if the client or document isn't ready
+            if (client == null || document == null || newValue.equals(lastKnownText)) {
+                return;
+            }
+            
+            System.out.println("Text changed from: '" + oldValue + "' to: '" + newValue + "'");
+            
+            // Detect the type of change and where it occurred
+            if (newValue.length() > oldValue.length()) {
+                // Insertion
+                int position = findDifferencePosition(oldValue, newValue);
+                int length = newValue.length() - oldValue.length();
+                String insertedText = newValue.substring(position, position + length);
+                
+                System.out.println("Detected insertion: '" + insertedText + "' at position " + position);
+                
+                // Create and send operation
+                Operation operation = new Operation("insert", position, insertedText, client.getUser().getUserId());
+                client.sendOperation(operation);
+                
+            } else if (newValue.length() < oldValue.length()) {
+                // Deletion
+                int position = findDifferencePosition(newValue, oldValue);
+                int length = oldValue.length() - newValue.length();
+                String deletedText = oldValue.substring(position, position + length);
+                
+                System.out.println("Detected deletion: '" + deletedText + "' at position " + position);
+                
+                // Create and send operation
+                Operation operation = new Operation("delete", position, deletedText, client.getUser().getUserId());
+                client.sendOperation(operation);
+            }
+            
+            // Update the last known text state after sending operations
+            lastKnownText = newValue;
+            
+            // Update document
+            document.setText(newValue);
+            
+            // Send cursor position
+            int caretPosition = textArea.getCaretPosition();
+            client.sendCursorUpdate(caretPosition);
+            
+        } catch (Exception e) {
+            System.err.println("Error handling text change: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // Helper method to find where two strings differ
+    private int findDifferencePosition(String s1, String s2) {
+        int maxLength = Math.min(s1.length(), s2.length());
+        
+        for (int i = 0; i < maxLength; i++) {
+            if (s1.charAt(i) != s2.charAt(i)) {
+                return i;
+            }
+        }
+        
+        return maxLength;
     }
 }

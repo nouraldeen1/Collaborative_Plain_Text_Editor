@@ -4,6 +4,7 @@ import io.netty.channel.Channel;
 import model.Document;
 import model.Operation;
 import model.User;
+import server.ClientHandler.Message;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,19 +62,61 @@ public class Session {
     }
 
     public void applyOperation(Operation operation) {
-        document.applyOperation(operation);
-        broadcastOperation(operation);
+        try {
+            // Apply to document model
+            if ("insert".equals(operation.getType())) {
+                String text = document.getText();
+                int pos = operation.getPosition();
+                String newText = text.substring(0, pos) + operation.getContent() + text.substring(pos);
+                document.setText(newText);
+            } else if ("delete".equals(operation.getType())) {
+                String text = document.getText();
+                int pos = operation.getPosition();
+                int endPos = Math.min(pos + operation.getContent().length(), text.length());
+                String newText = text.substring(0, pos) + text.substring(endPos);
+                document.setText(newText);
+            }
+            
+            System.out.println("Applied operation to server document: " + operation.getType() + 
+                             " at pos " + operation.getPosition() + 
+                             ", content: '" + operation.getContent() + "'");
+            
+            // Broadcast to all clients
+            broadcastOperation(operation);
+        } catch (Exception e) {
+            System.err.println("Error applying operation on server: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     private void broadcastOperation(Operation operation) {
-        for (Map.Entry<String, Channel> entry : clients.entrySet()) {
-            String userID = entry.getKey();
-            Channel channel = entry.getValue();
-            if (channel != null && channel.isActive()) {
-                // Send operation to the client
+        try {
+            // Serialize operation
+            ObjectMapper mapper = new ObjectMapper();
+            String opJson = mapper.writeValueAsString(operation);
+            
+            // Create message
+            Message message = new Message("operation", null, operation.getUserId(), opJson, false);
+            String msgJson = mapper.writeValueAsString(message) + "\n";
+            
+            System.out.println("Broadcasting operation to " + clients.size() + " clients: " + msgJson);
+            
+            // Send to all clients
+            for (Map.Entry<String, Channel> entry : clients.entrySet()) {
+                Channel channel = entry.getValue();
+                String clientId = entry.getKey();
+                
+                if (channel != null && channel.isActive()) {
+                    System.out.println("Sending to client: " + clientId);
+                    channel.writeAndFlush(msgJson);
+                }
             }
+        } catch (Exception e) {
+            System.err.println("Error broadcasting operation: " + e.getMessage());
+            e.printStackTrace();
         }
     }
+
     public Document getDocument() {
         return document;
     }
