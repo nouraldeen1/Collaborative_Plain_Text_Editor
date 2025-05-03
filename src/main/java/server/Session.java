@@ -8,6 +8,8 @@ import model.User;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 public class Session {
     private final String editorCode;
     private final String viewerCode;
@@ -37,6 +39,17 @@ public class Session {
     public void addClient(String userID, Channel channel, User user) {
         clients.put(userID, channel);
         users.put(userID, user);
+        
+        // Send document to the newly joined client
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String documentJson = mapper.writeValueAsString(document);
+            ClientHandler.Message responseMsg = new ClientHandler.Message("document", null, null, documentJson, false);
+            channel.writeAndFlush(mapper.writeValueAsString(responseMsg) + "\n");
+        } catch (Exception e) {
+            System.err.println("Error sending document to client: " + e.getMessage());
+        }
+        
         broadcastUserList();
     }
 

@@ -1,41 +1,109 @@
 package server;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import model.Document;
 import model.Operation;
 import model.User;
-import com.fasterxml.jackson.databind.DeserializationFeature;
+
 import java.awt.Color;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-// Add this line
-import client.ClientMessage;
+import java.util.ArrayList;
+import java.util.List;
+
 public class ClientHandler extends SimpleChannelInboundHandler<String> {
     private Session session;
     private String userID;
     private final Map<String, Session> sessions;
-    private ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
+    private StringBuilder jsonBuilder = new StringBuilder();
+    private int jsonBraceCount = 0;
+    private boolean collectingJson = false;
     
-        public ClientHandler(Map<String, Session> sessions) {
-            this.sessions = sessions;
-            this.mapper = new ObjectMapper();
-        
-        // Make the mapper more tolerant
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    public ClientHandler(Map<String, Session> sessions) {
+        this.sessions = sessions;
+        this.mapper = new ObjectMapper();
+        this.mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) {
+        System.out.println("Client connected: " + ctx.channel().remoteAddress());
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, String msg) {
         try {
-            Message message = mapper.readValue(msg, Message.class);
-
+            // Clean up message
+            msg = msg.trim();
+            if (msg.isEmpty()) return;
+            
+            System.out.println("Received data: " + msg);
+            
+            // If we're not currently collecting JSON and this looks like the start of a JSON object
+            if (!collectingJson && msg.startsWith("{")) {
+                jsonBuilder = new StringBuilder(msg);
+                jsonBraceCount = countBraces(msg);
+                collectingJson = true;
+                
+                // If we have a complete JSON object already
+                if (isValidJson(jsonBuilder.toString())) {
+                    processJsonMessage(ctx, jsonBuilder.toString());
+                    collectingJson = false;
+                    jsonBuilder = new StringBuilder();
+                    jsonBraceCount = 0;
+                }
+                return;
+            }
+            
+            // If we're collecting JSON, append this line
+            if (collectingJson) {
+                jsonBuilder.append(msg);
+                jsonBraceCount += countBraces(msg);
+                
+                // If we now have a complete JSON object
+                if (isValidJson(jsonBuilder.toString())) {
+                    processJsonMessage(ctx, jsonBuilder.toString());
+                    collectingJson = false;
+                    jsonBuilder = new StringBuilder();
+                    jsonBraceCount = 0;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error processing message: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private int countBraces(String text) {
+        int count = 0;
+        for (char c : text.toCharArray()) {
+            if (c == '{') count++;
+            else if (c == '}') count--;
+        }
+        return count;
+    }
+    
+    private boolean isValidJson(String json) {
+        return json.startsWith("{") && json.endsWith("}") && countBraces(json) == 0;
+    }
+    
+    private void processJsonMessage(ChannelHandlerContext ctx, String jsonString) {
+        try {
+            System.out.println("Processing JSON message: " + jsonString);
+            Message message = mapper.readValue(jsonString, Message.class);
+            
             switch (message.type) {
                 case "join":
                     handleJoin(ctx, message);
+                    break;
+                case "create":
+                    handleCreate(ctx, message);
                     break;
                 case "operation":
                     handleOperation(message);
@@ -43,19 +111,17 @@ public class ClientHandler extends SimpleChannelInboundHandler<String> {
                 case "cursor":
                     handleCursor(message);
                     break;
-                case "create":
-                    handleCreate(ctx, message);
-                    break;
                 default:
                     System.err.println("Unknown message type: " + message.type);
             }
         } catch (Exception e) {
-            System.err.println("Error processing message: " + e.getMessage());
-            System.err.println("Message content: " + (msg != null ? msg.substring(0, Math.min(50, msg.length())) : "null"));
+            System.err.println("Error processing JSON message: " + e.getMessage());
+            System.err.println("Message content: " + jsonString);
             e.printStackTrace();
         }
     }
 
+    // Rest of the methods remain the same...
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         if (session != null && userID != null) {
@@ -138,7 +204,7 @@ public class ClientHandler extends SimpleChannelInboundHandler<String> {
                 System.out.println("Sending document JSON to client: " + documentJson);
                 
                 Message responseMsg = new Message("document", null, null, documentJson, false);
-                String responseStr = mapper.writeValueAsString(responseMsg);
+                String responseStr = mapper.writeValueAsString(responseMsg) + "\n";
                 System.out.println("Full response message: " + responseStr);
                 
                 ctx.writeAndFlush(responseStr);
@@ -167,21 +233,22 @@ public class ClientHandler extends SimpleChannelInboundHandler<String> {
     private void sendError(ChannelHandlerContext ctx, String errorMessage) {
         try {
             Message errorMsg = new Message("error", null, null, errorMessage, false);
-            ctx.writeAndFlush(mapper.writeValueAsString(errorMsg));
+            ctx.writeAndFlush(mapper.writeValueAsString(errorMsg) + "\n");
         } catch (Exception e) {
             System.err.println("Failed to send error message: " + e.getMessage());
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Message {
         public String type;
         public String sessionId;
         public String userId;
         public String data;
         public boolean isEditor;
-
+        
         public Message() {}
-
+        
         public Message(String type, String sessionId, String userId, String data, boolean isEditor) {
             this.type = type;
             this.sessionId = sessionId;

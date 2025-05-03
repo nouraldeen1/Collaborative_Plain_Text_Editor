@@ -97,6 +97,10 @@ public class CollaborativeClient {
         if (channel != null && channel.isActive()) {
             String json = JsonUtil.toJson(message);
             System.out.println("Sending message to server: " + json);
+            // Ensure the message ends with a newline for proper framing
+            if (!json.endsWith("\n")) {
+                json = json + "\n";
+            }
             channel.writeAndFlush(json);
         } else {
             System.err.println("Cannot send message: channel is null or inactive");

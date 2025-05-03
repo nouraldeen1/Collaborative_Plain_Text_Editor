@@ -41,6 +41,7 @@ public class EditorUI extends Application {
     private Label codeLabel;
     private Map<String, Rectangle> cursors; // Maps userID to cursor rectangle
     private boolean isEditor;
+    private boolean updatingTextArea = false;
 
     @Override
     public void start(Stage primaryStage) {
@@ -95,7 +96,7 @@ public class EditorUI extends Application {
         textArea.textProperty().addListener((obs, oldValue, newValue) -> {
             // Handle insertions/deletions
             if (isEditor) {
-                handleTextChange(oldValue, newValue);
+                handleTextChange();
             }
         });
 
@@ -138,7 +139,7 @@ public class EditorUI extends Application {
         // Client callbacks
         client.setOperationCallback(this::applyOperation);
         client.setDocumentCallback(this::updateDocument);
-        client.setUserListCallback(this::updateUserList);
+        client.setUserListCallback(this::refreshUserList);
         client.setCursorCallback(this::updateCursor);
 
         // Start client
@@ -165,30 +166,154 @@ public class EditorUI extends Application {
 
     private void joinSession(String code) {
         try {
-            client.joinSession(code);
-
+            System.out.println("Setting up callbacks before joining session...");
+            
+            // Set document callback to handle incoming document data
             client.setDocumentCallback(documentText -> {
                 try {
-                    Document document = JsonUtil.fromJson(documentText, Document.class);
+                    System.out.println("Received document: " + documentText);
+                    Document doc = JsonUtil.fromJson(documentText, Document.class);
+                    document = doc; // Store the document in the class field
+                    
                     Platform.runLater(() -> {
-                        textArea.setText(document.getText());
-                        codeLabel.setText("Editor: " + document.getEditorCode() + " | Viewer: " + document.getViewerCode());
+                        System.out.println("Updating UI with document text: " + doc.getText());
+                        updatingTextArea = true; // Prevent infinite loop with change listener
+                        try {
+                            textArea.setText(doc.getText());
+                            codeLabel.setText("Editor: " + doc.getEditorCode() + " | Viewer: " + doc.getViewerCode());
+                        } finally {
+                            updatingTextArea = false;
+                        }
                     });
+                    
+                    // Initialize the CRDT manager with the received document
+                    crdtManager = new CRDTManager(doc);
+                    
                 } catch (Exception e) {
+                    System.err.println("Error processing document: " + e.getMessage());
                     e.printStackTrace();
                 }
             });
-
+            
+            // Set operation callback to handle text operations from other clients
             client.setOperationCallback(operation -> {
-                // Handle incoming operations
+                System.out.println("Received operation: type=" + operation.getType() + 
+                                   ", position=" + operation.getPosition() + 
+                                   ", content='" + operation.getContent() + "'");
+                Platform.runLater(() -> {
+                    try {
+                        // Apply the operation to the document
+                        if (operation.getType().equals("insert")) {
+                            applyInsert(operation);
+                        } else if (operation.getType().equals("delete")) {
+                            applyDelete(operation);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Error applying operation: " + e.getMessage());
+                        e.printStackTrace();
+                    }
+                });
             });
-
+            
+            // Set cursor callback to handle cursor updates from other clients
             client.setCursorCallback((userId, position) -> {
-                // Handle cursor updates
+                System.out.println("Received cursor update: user=" + userId + ", position=" + position);
+                Platform.runLater(() -> {
+                    updateCursor(userId, position);
+                });
             });
-
+            
+            // Set user list callback to handle user list updates
+            client.setUserListCallback(userIds -> {
+                System.out.println("Received user list update: " + userIds.size() + " users");
+                Platform.runLater(() -> {
+                    updateUserList(userIds);
+                });
+            });
+            
+            System.out.println("Joining session with code: " + code);
+            client.joinSession(code);
+            System.out.println("Join request sent");
+            
         } catch (Exception e) {
+            System.err.println("Error joining session: " + e.getMessage());
+            e.printStackTrace();
             Platform.runLater(() -> showError("Failed to join session: " + e.getMessage()));
+        }
+    }
+    
+    // Helper method to apply an insert operation
+    private void applyInsert(Operation operation) {
+        if (updatingTextArea) return;
+        
+        updatingTextArea = true;
+        try {
+            String currentText = textArea.getText();
+            int position = Math.min(operation.getPosition(), currentText.length());
+            String newText = currentText.substring(0, position) + 
+                             operation.getContent() + 
+                             currentText.substring(position);
+            
+            textArea.setText(newText);
+            
+            // Update our document model
+            if (document != null) {
+                document.setText(newText);
+            }
+            
+            System.out.println("Applied insert operation: '" + operation.getContent() + 
+                               "' at position " + position);
+        } finally {
+            updatingTextArea = false;
+        }
+    }
+    
+    // Helper method to apply a delete operation
+    private void applyDelete(Operation operation) {
+        if (updatingTextArea) return;
+        
+        updatingTextArea = true;
+        try {
+            String currentText = textArea.getText();
+            int position = operation.getPosition();
+            int length = operation.getContent().length();
+            
+            if (position >= 0 && position < currentText.length()) {
+                int endPos = Math.min(position + length, currentText.length());
+                String newText = currentText.substring(0, position) + 
+                                 currentText.substring(endPos);
+                
+                textArea.setText(newText);
+                
+                // Update our document model
+                if (document != null) {
+                    document.setText(newText);
+                }
+                
+                System.out.println("Applied delete operation: removed '" + 
+                                   operation.getContent() + "' from position " + position);
+            }
+        } finally {
+            updatingTextArea = false;
+        }
+    }
+    
+    // Helper method to update cursor display for other users
+    private void updateCursor(String userId, int position) {
+        // Implement cursor highlighting for other users
+        System.out.println("Updating cursor for user " + userId + " at position " + position);
+        
+        // This would typically involve highlighting the cursor position in the text area
+        // You might use a custom TextArea implementation or a different approach
+    }
+    
+    // Helper method to update the user list
+    private void refreshUserList(List<String> userIds) {
+        System.out.println("Updating user list with: " + userIds);
+        // Update your UI component that shows the list of users
+        userList.getItems().clear();
+        for (String userId : userIds) {
+            userList.getItems().add(userId);
         }
     }
 
@@ -261,25 +386,69 @@ public class EditorUI extends Application {
         }
     }
 
-    private void handleTextChange(String oldValue, String newValue) {
-        try {
-            int position = textArea.getCaretPosition();
-            if (newValue.length() > oldValue.length()) {
-                // Insertion
-                char inserted = newValue.charAt(position - 1);
-                Operation op = crdtManager.insert(inserted, position - 1, client.getUser());
-                client.sendOperation(op);
-            } else if (newValue.length() < oldValue.length()) {
-                // Deletion
-                Operation op = crdtManager.delete(position, client.getUser());
-                if (op != null) {
-                    client.sendOperation(op);
-                }
-            }
-            updateTextArea();
-        } catch (Exception e) {
-            showError("Error processing edit: " + e.getMessage());
+    private void handleTextChange() {
+        if (updatingTextArea || document == null || crdtManager == null) {
+            return; // Skip if we're updating the text programmatically or not fully initialized
         }
+        
+        try {
+            int caretPosition = textArea.getCaretPosition();
+            String currentText = textArea.getText();
+            String previousText = document.getText();
+            
+            if (currentText.equals(previousText)) {
+                return; // No change
+            }
+            
+            System.out.println("Text changed from '" + previousText + "' to '" + currentText + "'");
+            
+            // Find the difference (this is a simplified approach)
+            if (currentText.length() > previousText.length()) {
+                // Insert operation
+                int diffIndex = findDiffIndex(previousText, currentText);
+                int insertLength = currentText.length() - previousText.length();
+                String insertedText = currentText.substring(diffIndex, diffIndex + insertLength);
+                
+                System.out.println("Detected insert: '" + insertedText + "' at position " + diffIndex);
+                
+                // Create and send operation
+                Operation operation = new Operation("insert", diffIndex, insertedText, client.getUser().getUserId());
+                client.sendOperation(operation);
+                
+            } else if (currentText.length() < previousText.length()) {
+                // Delete operation
+                int diffIndex = findDiffIndex(currentText, previousText);
+                int deleteLength = previousText.length() - currentText.length();
+                String deletedText = previousText.substring(diffIndex, diffIndex + deleteLength);
+                
+                System.out.println("Detected delete: '" + deletedText + "' at position " + diffIndex);
+                
+                // Create and send operation
+                Operation operation = new Operation("delete", diffIndex, deletedText, client.getUser().getUserId());
+                client.sendOperation(operation);
+            }
+            
+            // Update our document model with the new text
+            document.setText(currentText);
+            
+            // Send cursor position
+            client.sendCursorUpdate(caretPosition);
+            
+        } catch (Exception e) {
+            System.err.println("Error handling text change: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // Helper method to find the index where two strings start to differ
+    private int findDiffIndex(String s1, String s2) {
+        int minLength = Math.min(s1.length(), s2.length());
+        for (int i = 0; i < minLength; i++) {
+            if (s1.charAt(i) != s2.charAt(i)) {
+                return i;
+            }
+        }
+        return minLength; // Strings are identical up to the length of the shorter one
     }
 
     private void applyOperation(Operation operation) {
@@ -316,6 +485,17 @@ public class EditorUI extends Application {
 
     private void updateTextArea() {
         textArea.setText(document.getText());
+    }
+
+    private void updateTextArea(String text) {
+        if (updatingTextArea) return; // Prevent recursive updates
+        
+        try {
+            updatingTextArea = true;
+            textArea.setText(text);
+        } finally {
+            updatingTextArea = false;
+        }
     }
 
     private void showError(String message) {

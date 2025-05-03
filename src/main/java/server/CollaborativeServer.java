@@ -5,13 +5,11 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.LineBasedFrameDecoder;
 import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.codec.string.StringEncoder;
-import model.Document;
 
-import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CollaborativeServer {
@@ -34,9 +32,14 @@ public class CollaborativeServer {
                         @Override
                         protected void initChannel(SocketChannel ch) {
                             ChannelPipeline pipeline = ch.pipeline();
+                            
+                            // Use LineBasedFrameDecoder for proper message framing
+                            pipeline.addLast(new LineBasedFrameDecoder(65536));
                             pipeline.addLast(new StringDecoder());
                             pipeline.addLast(new StringEncoder());
-                            pipeline.addLast(new ClientHandler(sessions)); // Corrected line
+                            
+                            // Add the ClientHandler to process messages
+                            pipeline.addLast(new ClientHandler(sessions));
                         }
                     })
                     .option(ChannelOption.SO_BACKLOG, 128)
