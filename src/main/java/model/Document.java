@@ -9,7 +9,7 @@ public class Document {
     private String text;
     private String editorCode;
     private String viewerCode;
-    private Map<String, CRDVNode> content;  // Added for CRDT
+    private Map<String, CRDVNode> content;  
 
     public Document() {
         this.text = "";

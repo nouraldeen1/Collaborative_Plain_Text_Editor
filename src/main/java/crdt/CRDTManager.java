@@ -82,8 +82,6 @@ public class CRDTManager {
     }
 
     private String findIdentifierAtPosition(int position) {
-        // This is a simplified implementation
-        // In a real implementation, you would need to map positions to identifiers
         return null;
     }
     public Operation[] paste(String content, int position, User user) {

@@ -18,11 +18,11 @@ public class User {
         this.cursorPosition = 0;
     }
 
-    public String getUserId() {  // Changed from getUserID to getUserId
+    public String getUserId() {  
         return userId;
     }
  
-    public void setUserId(String userId) {  // Changed from setUserID to setUserId
+    public void setUserId(String userId) { 
         this.userId = userId;
     }
 
